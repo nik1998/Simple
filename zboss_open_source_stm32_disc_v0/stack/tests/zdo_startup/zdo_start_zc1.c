@@ -52,9 +52,11 @@ PURPOSE: Test for ZC application written using ZDO.
 #include "zb_nwk.h"
 #include "zb_aps.h"
 #include "zb_zdo.h"
-
+#define dToggle 2
+#define dStepUp 1
+#define dChangeColor 3
 #define ZB_TEST_DUMMY_DATA_SIZE 10
-
+#include "stm32.h"
 zb_ieee_addr_t g_zc_addr = {0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
 
 /*! \addtogroup ZB_TESTS */
@@ -63,33 +65,25 @@ zb_ieee_addr_t g_zc_addr = {0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
 #ifndef ZB_COORDINATOR_ROLE
 #error Coordinator role is not compiled!
 #endif
-#define dToggle 2
-#define dStepUp 1
-#define dChangeColor 3
-#define ZB_TEST_DUMMY_DATA_SIZE 10
-#include "stm32.h"
+
 /*
   The test is: ZC starts PAN, ZR joins to it by association and send APS data packet, when ZC
   received packet, it sends packet to ZR, when ZR received packet, it sends
   packet to ZC etc.
  */
+//zb_uint8_t stat=1;
 int ind=1;
 //int color =1;
 int arr[3];
 int a[10]={1,1,1,2,3,1,1,2,3,2};
 static int cur=0;
-//static void zc_send_data(zb_buf_t *buf);
+static void zc_send_data(zb_buf_t *buf);
 //void checkf(zb_uint8_t param);
 //void data_indication(zb_uint8_t param) ZB_CALLBACK;
 void TimTim();
 void Initleds(int Pins, int PinSource);
 void MyInit();
 void CommandParse(zb_uint8_t param);
-
-static void zc_send_data(zb_buf_t *buf, zb_uint16_t addr);
-
-void data_indication(zb_uint8_t param) ZB_CALLBACK;
-
 MAIN()
 {
   ARGV_UNUSED;
@@ -112,7 +106,7 @@ MAIN()
 #ifdef ZB_SECURITY
   ZG->nwk.nib.security_level = 0;
 #endif
-  MyInit();
+  //MyInit();
   ZB_IEEE_ADDR_COPY(ZB_PIB_EXTENDED_ADDRESS(), &g_zc_addr);
   MAC_PIB().mac_pan_id = 0x1aaa;
 
@@ -130,9 +124,24 @@ MAIN()
   }
 
   TRACE_DEINIT();
-
+  zb_af_set_data_indication(CommandParse);
   MAIN_RETURN(0);
 }
+
+/*static void check(zb_buf_t *buf)
+{
+    zb_uint8_t *ptr = NULL;
+    GPIO_SetBits(GPIOD,GPIO_Pin_12|GPIO_Pin_14|GPIO_Pin_15); 
+    ZB_BUF_INITIAL_ALLOC(buf, ZB_TEST_DUMMY_DATA_SIZE , ptr);
+    if(cur<10)
+    {
+      ptr[0]=a[cur];
+      CommandParse(ZB_REF_FROM_BUF(buf));
+      cur+=1;
+      ZB_SCHEDULE_ALARM(check,buf,3*ZB_TIME_ONE_SECOND);
+    }
+    //ZB_SCHEDULE_CALLBACK(zb_apsde_data_request, ZB_REF_FROM_BUF(buf));
+ }*/
 
 void zb_zdo_startup_complete(zb_uint8_t param) ZB_CALLBACK
 {
@@ -141,9 +150,8 @@ void zb_zdo_startup_complete(zb_uint8_t param) ZB_CALLBACK
   if (buf->u.hdr.status == 0)
   {
     TRACE_MSG(TRACE_APS1, "Device STARTED OK", (FMT__0));
-   // zb_af_set_data_indication(data_indication);
-     zb_af_set_data_indication(CommandParse);
-    // ZB_SCHEDULE_ALARM(zc_send_data,buf,5*ZB_TIME_ONE_SECOND);
+    zb_af_set_data_indication(CommandParse);
+    ZB_SCHEDULE_ALARM(zc_send_data,buf,5*ZB_TIME_ONE_SECOND);
   }
   else
   {
@@ -151,12 +159,6 @@ void zb_zdo_startup_complete(zb_uint8_t param) ZB_CALLBACK
   }
   zb_free_buf(buf);
 }
-
-
-/*
-   Trivial test: dump all APS data received
- */
-
 void MyInit()
 {
   RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
@@ -193,69 +195,6 @@ void Initleds(int Pins,int PinSource)
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 }
 
-
-void data_indication(zb_uint8_t param) ZB_CALLBACK
-{
-  zb_uint8_t *ptr;
-  zb_buf_t *asdu = (zb_buf_t *)ZB_BUF_FROM_REF(param);
-  zb_apsde_data_indication_t *ind = ZB_GET_BUF_PARAM(asdu, zb_apsde_data_indication_t);
-
-  /* Remove APS header from the packet */
-  ZB_APS_HDR_CUT_P(asdu, ptr);
-
-  TRACE_MSG(TRACE_APS3, "apsde_data_indication: packet %p len %d handle 0x%x", (FMT__P_D_D,
-                         asdu, (int)ZB_BUF_LEN(asdu), asdu->u.hdr.status));
-
-  /* send packet back to ZR */
-  zc_send_data(asdu, ind->src_addr);
-}
-/*static void zc_send_data(zb_buf_t *buf)
-{
-    zb_apsde_data_req_t *req;
-    zb_uint8_t *ptr = NULL;
-    zb_short_t i;
-
-    ZB_BUF_INITIAL_ALLOC(buf, ZB_TEST_DUMMY_DATA_SIZE , ptr);
-    req = ZB_GET_BUF_TAIL(buf, sizeof(zb_apsde_data_req_t));
-    req->dst_addr.addr_short = 0x0001;
-    req->addr_mode = ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
-    req->tx_options = ZB_APSDE_TX_OPT_ACK_TX;
-    req->radius = 1;
-    req->profileid = 2;
-    req->src_endpoint = 10;
-    req->dst_endpoint = 10;
-    buf->u.hdr.handle = 0x11;
-    for (i = 0 ; i < ZB_TEST_DUMMY_DATA_SIZE ; i++)
-    {
-      ptr[i] = i + '0';
-    }
-    TRACE_MSG(TRACE_APS3, "Sending apsde_data.request", (FMT__0));
-    ZB_SCHEDULE_CALLBACK(zb_apsde_data_request, ZB_REF_FROM_BUF(buf));
- }*/
-
-static void zc_send_data(zb_buf_t *buf, zb_uint16_t addr)
-{
-    zb_apsde_data_req_t *req;
-    zb_uint8_t *ptr = NULL;
-    zb_short_t i;
-
-    ZB_BUF_INITIAL_ALLOC(buf, ZB_TEST_DUMMY_DATA_SIZE , ptr);
-    req = ZB_GET_BUF_TAIL(buf, sizeof(zb_apsde_data_req_t));
-    req->dst_addr.addr_short = addr; /* send to ZR */
-    req->addr_mode = ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
-    req->tx_options = ZB_APSDE_TX_OPT_ACK_TX;
-    req->radius = 1;
-    req->profileid = 2;
-    req->src_endpoint = 10;
-    req->dst_endpoint = 10;
-    buf->u.hdr.handle = 0x11;
-    for (i = 0 ; i < ZB_TEST_DUMMY_DATA_SIZE ; i++)
-    {
-      ptr[i] = i + '0';
-    }
-    TRACE_MSG(TRACE_APS3, "Sending apsde_data.request", (FMT__0));
-    ZB_SCHEDULE_CALLBACK(zb_apsde_data_request, ZB_REF_FROM_BUF(buf));
- }
 void TimTim()
 {
     TIM_TimeBaseInitTypeDef ttt;
@@ -344,5 +283,95 @@ void CommandParse(zb_uint8_t param)
     }
  }
 }
+/*void checkf(zb_uint8_t param)
+{
+  zb_buf_t *asdu = (zb_buf_t *)ZB_BUF_FROM_REF(param);
+  zb_uint8_t *ptr;
+  ZB_APS_HDR_CUT_P(asdu, ptr);
+ // TRACE_MSG(TRACE_APS2, "aaaaaaaaaa", (FMT__0));
+  switch(*ptr)
+  {
+
+     case dToggle:
+     {
+         stat=(stat+1)%2;
+         if(stat==1)
+         {
+           light=50;
+         }
+         else
+         {
+           light=0;
+         }
+         TRACE_MSG(TRACE_APS2,"toggle",(FMT__0));
+         break;
+     }
+     case dChangeColor:
+     {
+        color =(color)%3+1;
+        TRACE_MSG(TRACE_APS2, "Color %d", (FMT__D,color));
+        break;
+     }
+     case dStepUp:
+     {
+        int value =10;
+        if(light+value>100)
+        {
+          light=100;
+        }
+        else
+        light=light+value;
+        TRACE_MSG(TRACE_APS2, "level of light %d", (FMT__D,light));
+        break;
+     }
+         default:
+         TRACE_MSG(TRACE_APS2,"Unknown command!!!",(FMT__0));
+  }
+  //send_data(param);
+}*/
+
+
+/*
+   Trivial test: dump all APS data received
+ */
+
+
+/*void data_indication(zb_uint8_t param) ZB_CALLBACK
+{
+  zb_uint8_t *ptr;
+  zb_buf_t *asdu = (zb_buf_t *)ZB_BUF_FROM_REF(param);
+  zb_apsde_data_indication_t *ind = ZB_GET_BUF_PARAM(asdu, zb_apsde_data_indication_t);
+
+  ZB_APS_HDR_CUT_P(asdu, ptr);
+
+  TRACE_MSG(TRACE_APS3, "apsde_data_indication: packet %p len %d handle 0x%x", (FMT__P_D_D,
+                         asdu, (int)ZB_BUF_LEN(asdu), asdu->u.hdr.status));
+
+  zc_send_data(asdu, ind->src_addr);
+}*/
+
+static void zc_send_data(zb_buf_t *buf)
+{
+    zb_apsde_data_req_t *req;
+    zb_uint8_t *ptr = NULL;
+    zb_short_t i;
+
+    ZB_BUF_INITIAL_ALLOC(buf, ZB_TEST_DUMMY_DATA_SIZE , ptr);
+    req = ZB_GET_BUF_TAIL(buf, sizeof(zb_apsde_data_req_t));
+    req->dst_addr.addr_short = 0x0001;
+    req->addr_mode = ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
+    req->tx_options = ZB_APSDE_TX_OPT_ACK_TX;
+    req->radius = 1;
+    req->profileid = 2;
+    req->src_endpoint = 10;
+    req->dst_endpoint = 10;
+    buf->u.hdr.handle = 0x11;
+    for (i = 0 ; i < ZB_TEST_DUMMY_DATA_SIZE ; i++)
+    {
+      ptr[i] = i + '0';
+    }
+    TRACE_MSG(TRACE_APS3, "Sending apsde_data.request", (FMT__0));
+    ZB_SCHEDULE_CALLBACK(zb_apsde_data_request, ZB_REF_FROM_BUF(buf));
+ }
 
 /*! @} */
