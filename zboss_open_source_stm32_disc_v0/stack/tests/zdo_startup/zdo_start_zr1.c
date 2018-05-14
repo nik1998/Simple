@@ -53,21 +53,13 @@ PURPOSE: Test for ZC application written using ZDO.
 #include "zb_nwk.h"
 #include "zb_aps.h"
 #include "zb_zdo.h"
-
-#ifndef ZB_ED_ROLE
-#error define ZB_ED_ROLE to compile ze tests
-#endif
-/*! \addtogroup ZB_TESTS */
-/*! @{ */
-
-#define ZB_TEST_DUMMY_DATA_SIZE 10
 #define dToggle 2
 #define dStepUp 1
 #define dChangeColor 3
 #include "stm32.h"
 
 int ind=1;
-//static void send_data(zb_buf_t *buf);
+static void send_data(zb_buf_t *buf);
 void function_state(int ind);
 void MyInit();
 int arr[3];
@@ -75,23 +67,23 @@ void CommandParse(int com);
 void ChangePulse(int delta);
 void TimTim();
 void Initleds(int Pins, int PinSource);
-zb_ieee_addr_t g_ze_addr = {0xed, 0xed, 0xed, 0xed, 0xed, 0xed, 0xed, 0xed};
 
-static void send_data(zb_uint8_t param) ZB_CALLBACK;
+/*#ifndef APS_RETRANSMIT_TEST
 void data_indication(zb_uint8_t param) ZB_CALLBACK;
-
-
-
-/*
-  ZE joins to ZC(ZR), then sends APS packet.
+#endif
 */
+/*
+  ZR joins to ZC, then sends APS packet.
+ */
+ 
+zb_ieee_addr_t g_zr_addr = {0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb};
 
 
 MAIN()
 {
   ARGV_UNUSED;
 
-#if !(defined KEIL || defined SDCC || defined ZB_IAR )
+#if !(defined KEIL || defined SDCC|| defined ZB_IAR)
   if ( argc < 3 )
   {
     //printf("%s <read pipe path> <write pipe path>\n", argv[0]);
@@ -101,18 +93,33 @@ MAIN()
 
   /* Init device, load IB values from nvram or set it to default */
 #ifndef ZB8051
-  ZB_INIT("zdo_ze", argv[1], argv[2]);
+  ZB_INIT("zdo_zr", argv[1], argv[2]);
 #else
-  ZB_INIT((char*)"zdo_ze", (char*)"3", (char*)"3");
+  ZB_INIT("zdo_zr", "2", "2");
 #endif
+  
 #ifdef ZB_SECURITY
   ZG->nwk.nib.security_level = 0;
 #endif
-  MyInit();
-  ZB_IEEE_ADDR_COPY(ZB_PIB_EXTENDED_ADDRESS(), &g_ze_addr);
-  ZB_PIB_RX_ON_WHEN_IDLE() = ZB_FALSE;
-  ZB_AIB().aps_channel_mask = (1l << 22);
+//  MyInit();
+  /* FIXME: temporary, until neighbor table is not in nvram */
+  /* add extended address of potential parent to emulate that we've already
+   * been connected to it */
+  {
+    zb_address_ieee_ref_t ref;
+    /*
+     * zb_ieee_addr_t ieee_address;
+
 	
+    ZB_64BIT_ADDR_ZERO(ieee_address);
+    ieee_address[7] = 8;
+	*/
+    zb_address_update(g_zr_addr, 0, ZB_FALSE, &ref); // legacy
+    //ZB_MEMCPY(ZB_PIB_SHORT_ADDRESS(),&short_addr,sizeof(short_addr));
+    ZB_IEEE_ADDR_COPY(ZB_PIB_EXTENDED_ADDRESS(), &g_zr_addr);
+  }
+
+ // MyInit();
   if (zdo_dev_start() != RET_OK)
   {
     TRACE_MSG(TRACE_ERROR, "zdo_dev_start failed", (FMT__0));
@@ -121,9 +128,9 @@ MAIN()
   {
     zdo_main_loop();
   }
-
+ // MyInit();
   TRACE_DEINIT();
-
+  
   MAIN_RETURN(0);
 }
 void MyInit()
@@ -155,7 +162,7 @@ void MyInit()
   GPIO_In.GPIO_Speed = GPIO_Speed_100MHz;
   GPIO_In.GPIO_PuPd = GPIO_PuPd_UP;
   GPIO_Init(GPIOE, &GPIO_In);
-//interrupt
+ //interrupt
    EXTI_InitTypeDef eee;
    eee.EXTI_Line=EXTI_Line0;
    eee.EXTI_LineCmd=ENABLE;
@@ -182,8 +189,8 @@ void MyInit()
   arr[1]=0;
   arr[2]=0;
   GPIO_SetBits(GPIOD,GPIO_Pin_14); 
-}
- //Init Leds
+  } 
+   //Init Leds
   void Initleds(int Pins,int PinSource)
   {
     GPIO_InitTypeDef  GPIO_InitStructure;
@@ -343,23 +350,24 @@ void CommandParse(int com)
     }
  }
 }
+
 void zb_zdo_startup_complete(zb_uint8_t param) ZB_CALLBACK
 {
   zb_buf_t *buf = ZB_BUF_FROM_REF(param);
   if (buf->u.hdr.status == 0)
-  {
-    TRACE_MSG(TRACE_APS1, "Device STARTED OK", (FMT__0));
-    //zb_af_set_data_indication(data_indication);
-    
-    //ZB_SCHEDULE_ALARM(send_data, param, 195);
-  }
+    {
+      TRACE_MSG(TRACE_APS1, "Device STARTED OK", (FMT__0));
+#ifndef APS_RETRANSMIT_TEST
+     // zb_af_set_data_indication(data_indication);
+#endif
+     }
   else
-  {
-    TRACE_MSG(TRACE_ERROR, "Device started FAILED status %d", (FMT__D, (int)buf->u.hdr.status));
-    zb_free_buf(buf);
-  }
+    {
+      TRACE_MSG(TRACE_ERROR, "Device started FAILED status %d", (FMT__D, (int)buf->u.hdr.status));
+      zb_free_buf(buf);
+    }
 }
-/*static void send_data(zb_buf_t *buf)
+static void send_data(zb_buf_t *buf)
 {
   zb_apsde_data_req_t *req;
  // zb_uint8_t *ptr = NULL;
@@ -367,33 +375,6 @@ void zb_zdo_startup_complete(zb_uint8_t param) ZB_CALLBACK
 
  // ZB_BUF_INITIAL_ALLOC(buf, ZB_TEST_DATA_SIZE, ptr);
   req = ZB_GET_BUF_TAIL(buf, sizeof(zb_apsde_data_req_t));
-  req->dst_addr.addr_short = 0; // send to ZC 
-  req->addr_mode = ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
-  req->tx_options = ZB_APSDE_TX_OPT_ACK_TX;
-  req->radius = 1;
-  req->profileid = 2;
-  req->src_endpoint = 10;
-  req->dst_endpoint = 10;
-
-  buf->u.hdr.handle = 0x11;
-
-  //for (i = 0 ; i < ZB_TEST_DATA_SIZE ; ++i)
- // {
-   // ptr[i] = i % 32 + '0';
- // }
-  TRACE_MSG(TRACE_APS3, "Sending apsde_data.request", (FMT__0));
-
-  ZB_SCHEDULE_CALLBACK(zb_apsde_data_request, ZB_REF_FROM_BUF(buf));
-}*/
-
-
-void send_data(zb_uint8_t param) ZB_CALLBACK
-{
-  zb_buf_t *buf = ZB_BUF_FROM_REF(param);
-  zb_apsde_data_req_t *req = ZB_GET_BUF_TAIL(buf, sizeof(zb_apsde_data_req_t));
- // zb_uint8_t *ptr = NULL;
-  //zb_short_t i;
-
   req->dst_addr.addr_short = 0; /* send to ZC */
   req->addr_mode = ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
   req->tx_options = ZB_APSDE_TX_OPT_ACK_TX;
@@ -403,16 +384,16 @@ void send_data(zb_uint8_t param) ZB_CALLBACK
   req->dst_endpoint = 10;
 
   buf->u.hdr.handle = 0x11;
-  //ZB_BUF_INITIAL_ALLOC(buf, ZB_TEST_DATA_SIZE, ptr);
 
- // for (i = 0 ; i < ZB_TEST_DATA_SIZE ; ++i)
- // {
-   // ptr[i] = i % 32 + '0';
- // }
-  TRACE_MSG(TRACE_APS2, "Sending apsde_data.request", (FMT__0));
+  /*for (i = 0 ; i < ZB_TEST_DATA_SIZE ; ++i)
+  {
+    ptr[i] = i % 32 + '0';
+  }*/
+  TRACE_MSG(TRACE_APS3, "Sending apsde_data.request", (FMT__0));
 
   ZB_SCHEDULE_CALLBACK(zb_apsde_data_request, ZB_REF_FROM_BUF(buf));
 }
+
 void  Toggle (zb_uint8_t param)
 {
     zb_uint8_t *ptr = NULL;
@@ -437,6 +418,8 @@ void  ChangeColor (zb_uint8_t param)
    ptr[0]= dChangeColor ;
    send_data(param);
 }
+
+
 void function_state(int ind)
 {
     zb_uint8_t *ptr = NULL;
@@ -473,23 +456,30 @@ void function_state(int ind)
       // ZB_SCHEDULE_ALARM(zc_send_data,0,5*ZB_TIME_ONE_SECOND);
 }
 
-
-
+/*#ifndef APS_RETRANSMIT_TEST
 void data_indication(zb_uint8_t param)
 {
+  zb_ushort_t i;
   zb_uint8_t *ptr;
   zb_buf_t *asdu = (zb_buf_t *)ZB_BUF_FROM_REF(param);
 
-  /* Remove APS header from the packet */
   ZB_APS_HDR_CUT_P(asdu, ptr);
 
-  TRACE_MSG(TRACE_APS2, "data_indication: packet %p len %d handle 0x%x", (FMT__P_D_D,
+  TRACE_MSG(TRACE_APS3, "data_indication: packet %p len %d handle 0x%x", (FMT__P_D_D,
                          asdu, (int)ZB_BUF_LEN(asdu), asdu->u.hdr.status));
-  
-  ZB_SCHEDULE_ALARM(send_data, param, 195);
+
+  for (i = 0 ; i < ZB_BUF_LEN(asdu) ; ++i)
+  {
+    TRACE_MSG(TRACE_APS3, "%x %c", (FMT__D_C, (int)ptr[i], ptr[i]));
+    if (ptr[i] != i % 32 + '0')
+    {
+      TRACE_MSG(TRACE_ERROR, "Bad data %hx %c wants %x %c", (FMT__H_C_D_C, ptr[i], ptr[i],
+                              (int)(i % 32 + '0'), (char)i % 32 + '0'));
+    }
+  }
+ // send_data(asdu);
 }
-
-
-
+#endif
+*/
 
 /*! @} */
