@@ -73,11 +73,11 @@ zb_ieee_addr_t g_zc_addr = {0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
   received packet, it sends packet to ZR, when ZR received packet, it sends
   packet to ZC etc.
  */
-int ind=1;
+int curcolor=0;
 //int color =1;
-int arr[3];
-int a[10]={1,1,1,2,3,1,1,2,3,2};
-static int cur=0;
+int intensity[3];
+//int a[10]={1,1,1,2,3,1,1,2,3,2};
+//static int cur=0;
 //static void zc_send_data(zb_buf_t *buf);
 //void checkf(zb_uint8_t param);
 //void data_indication(zb_uint8_t param) ZB_CALLBACK;
@@ -86,9 +86,9 @@ void Initleds(int Pins, int PinSource);
 void MyInit();
 void CommandParse(zb_uint8_t param);
 
-static void zc_send_data(zb_buf_t *buf, zb_uint16_t addr);
 
-void data_indication(zb_uint8_t param) ZB_CALLBACK;
+
+//void data_indication(zb_uint8_t param) ZB_CALLBACK;
 
 MAIN()
 {
@@ -170,9 +170,9 @@ void MyInit()
   GPIO_Init(GPIOD, &GPIO_InitStructure1);
   Initleds(GPIO_Pin_8,GPIO_PinSource8);
   TimTim();
-  arr[0]=0;
-  arr[1]=0;
-  arr[2]=0;
+  intensity[0]=0;
+  intensity[1]=0;
+  intensity[2]=0;
   GPIO_SetBits(GPIOD,GPIO_Pin_14);
 }
 
@@ -194,68 +194,6 @@ void Initleds(int Pins,int PinSource)
 }
 
 
-void data_indication(zb_uint8_t param) ZB_CALLBACK
-{
-  zb_uint8_t *ptr;
-  zb_buf_t *asdu = (zb_buf_t *)ZB_BUF_FROM_REF(param);
-  zb_apsde_data_indication_t *ind = ZB_GET_BUF_PARAM(asdu, zb_apsde_data_indication_t);
-
-  /* Remove APS header from the packet */
-  ZB_APS_HDR_CUT_P(asdu, ptr);
-
-  TRACE_MSG(TRACE_APS3, "apsde_data_indication: packet %p len %d handle 0x%x", (FMT__P_D_D,
-                         asdu, (int)ZB_BUF_LEN(asdu), asdu->u.hdr.status));
-
-  /* send packet back to ZR */
-  zc_send_data(asdu, ind->src_addr);
-}
-/*static void zc_send_data(zb_buf_t *buf)
-{
-    zb_apsde_data_req_t *req;
-    zb_uint8_t *ptr = NULL;
-    zb_short_t i;
-
-    ZB_BUF_INITIAL_ALLOC(buf, ZB_TEST_DUMMY_DATA_SIZE , ptr);
-    req = ZB_GET_BUF_TAIL(buf, sizeof(zb_apsde_data_req_t));
-    req->dst_addr.addr_short = 0x0001;
-    req->addr_mode = ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
-    req->tx_options = ZB_APSDE_TX_OPT_ACK_TX;
-    req->radius = 1;
-    req->profileid = 2;
-    req->src_endpoint = 10;
-    req->dst_endpoint = 10;
-    buf->u.hdr.handle = 0x11;
-    for (i = 0 ; i < ZB_TEST_DUMMY_DATA_SIZE ; i++)
-    {
-      ptr[i] = i + '0';
-    }
-    TRACE_MSG(TRACE_APS3, "Sending apsde_data.request", (FMT__0));
-    ZB_SCHEDULE_CALLBACK(zb_apsde_data_request, ZB_REF_FROM_BUF(buf));
- }*/
-
-static void zc_send_data(zb_buf_t *buf, zb_uint16_t addr)
-{
-    zb_apsde_data_req_t *req;
-    zb_uint8_t *ptr = NULL;
-    zb_short_t i;
-
-    ZB_BUF_INITIAL_ALLOC(buf, ZB_TEST_DUMMY_DATA_SIZE , ptr);
-    req = ZB_GET_BUF_TAIL(buf, sizeof(zb_apsde_data_req_t));
-    req->dst_addr.addr_short = addr; /* send to ZR */
-    req->addr_mode = ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
-    req->tx_options = ZB_APSDE_TX_OPT_ACK_TX;
-    req->radius = 1;
-    req->profileid = 2;
-    req->src_endpoint = 10;
-    req->dst_endpoint = 10;
-    buf->u.hdr.handle = 0x11;
-    for (i = 0 ; i < ZB_TEST_DUMMY_DATA_SIZE ; i++)
-    {
-      ptr[i] = i + '0';
-    }
-    TRACE_MSG(TRACE_APS3, "Sending apsde_data.request", (FMT__0));
-    ZB_SCHEDULE_CALLBACK(zb_apsde_data_request, ZB_REF_FROM_BUF(buf));
- }
 void TimTim()
 {
     TIM_TimeBaseInitTypeDef ttt;
@@ -278,6 +216,54 @@ void TimTim()
     TIM_OC3Init(TIM1,&aaa);
     TIM_OC3PreloadConfig(TIM1,TIM_OCPreload_Enable);
 }
+void SetIntensity()
+{
+    if(curcolor==0)
+      TIM_SetCompare1(TIM1,intensity[curcolor]);
+    if(curcolor==1)
+      TIM_SetCompare2(TIM1,intensity[curcolor]); 
+    if(curcolor==2)
+      TIM_SetCompare3(TIM1,intensity[curcolor]);
+}
+void StepUp()
+{
+   intensity[curcolor]+=100;
+   if(intensity[curcolor]>1600)
+   {
+      intensity[curcolor]=0;
+   }
+   SetIntensity();
+}
+void Toggle()
+{
+   if(intensity[curcolor]==0)
+   {
+     intensity[curcolor]=800;
+   }
+   else
+   {
+     intensity[curcolor]=0;
+   }
+   SetIntensity();
+}
+void ChangeColor()
+{
+   GPIO_ResetBits(GPIOD,GPIO_Pin_12|GPIO_Pin_14|GPIO_Pin_15); 
+   if(curcolor==0)
+   {
+     GPIO_SetBits(GPIOD,GPIO_Pin_12); 
+   }
+   if(curcolor==1)
+   {
+     GPIO_SetBits(GPIOD,GPIO_Pin_15); 
+   }
+   if(curcolor==2)
+   {
+     GPIO_SetBits(GPIOD,GPIO_Pin_14); 
+   }
+   curcolor = (curcolor + 1) % 3;
+}
+
 void CommandParse(zb_uint8_t param)
 {
   zb_buf_t *asdu = (zb_buf_t *)ZB_BUF_FROM_REF(param);
@@ -287,62 +273,21 @@ void CommandParse(zb_uint8_t param)
   {
     case dStepUp:
     {
-      arr[ind-1]+=100;
-      if(arr[ind-1]>1600)
-      {
-        arr[ind-1]=0;
-      }
-      if(ind==1)
-      TIM_SetCompare1(TIM1,arr[ind-1]);
-      else
-      if(ind==2)
-      TIM_SetCompare2(TIM1,arr[ind-1]); 
-      else
-      TIM_SetCompare3(TIM1,arr[ind-1]);
-      break;
+       StepUp();
+       break;
     }
     case dToggle:
     {
-      if(arr[ind-1]==0)
-      {
-        arr[ind-1]=800;
-      }
-      else
-      {
-        arr[ind-1]=0;
-      }
-      if(ind==1)
-        TIM_SetCompare1(TIM1,arr[ind-1]);
-      else
-      if(ind==2)
-        TIM_SetCompare2(TIM1,arr[ind-1]); 
-      else
-      TIM_SetCompare3(TIM1,arr[ind-1]); 
-      break;
+       Toggle();
+       break;
     }
-     case dChangeColor:
+    case dChangeColor:
     {
-       GPIO_ResetBits(GPIOD,GPIO_Pin_12|GPIO_Pin_14|GPIO_Pin_15); 
-      if(ind==1)
-      {
-        GPIO_SetBits(GPIOD,GPIO_Pin_12); 
-        ind=2;
-      }
-      else
-            if(ind==2)
-            {
-              GPIO_SetBits(GPIOD,GPIO_Pin_15); 
-              ind=3;
-            }
-            else
-            if(ind==3)
-            {
-              GPIO_SetBits(GPIOD,GPIO_Pin_14); 
-              ind=1;
-            }
-      break;
+       ChangeColor();
+       break;
     }
- }
+  }
+  zb_free_buf(asdu);
 }
 
 /*! @} */
